@@ -100,6 +100,10 @@ jobs:
   adev:
     runs-on:
       labels: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Initialize environment
         uses: angular/dev-infra/github-actions/npm/checkout-and-setup-node@442c2fcbf06a321b5196b4c5fc70e78a49242958
@@ -111,9 +115,24 @@ jobs:
           google_credential: ${{ secrets.RBE_TRUSTED_BUILDS_USER }}
       - name: Install node modules
         run: pnpm install --frozen-lockfile
-      - name: Run tests
-        run: pnpm bazel test //adev/...
+      - name: Run tests (shard ${{ matrix.shard }}/4)
+        # //adev/... = 161 independent test targets (confirmed live: "160 / 161 tests" in a real
+        # run's bazel output). Partitioned by directory to keep this a plain YAML/query change, no
+        # BUILD-file edits — exhaustive and non-overlapping with the original //adev/... scope
+        # (each adev/ subdir appears in exactly one shard; //adev:all covers the root adev package's
+        # own targets, e.g. //adev:test, which the directory wildcards below don't reach). NOT
+        # verified to be wall-clock-balanced across shards — only directory-based, so shard-to-shard
+        # timing should be observed at Tier-2 verify and rebalanced if one shard dominates.
+        run: |
+          case "${{ matrix.shard }}" in
+            1) TARGETS="//adev:all //adev/src/app/... //adev/src/context/... //adev/src/styles/... //adev/src/assets/..." ;;
+            2) TARGETS="//adev/src/content/..." ;;
+            3) TARGETS="//adev/shared-docs/pipeline/... //adev/shared-docs/testing/... //adev/shared-docs/services/..." ;;
+            4) TARGETS="//adev/shared-docs/components/... //adev/shared-docs/directives/... //adev/shared-docs/pipes/... //adev/shared-docs/providers/... //adev/shared-docs/interfaces/... //adev/shared-docs/icons/... //adev/shared-docs/styles/... //adev/shared-docs/utils/... //adev/scripts/..." ;;
+          esac
+          pnpm bazel test $TARGETS
       - name: Build adev in fast mode to ensure it continues to work
+        if: matrix.shard == 1
         run: pnpm bazel build //adev:build
 
   vscode-ng-language-service:
